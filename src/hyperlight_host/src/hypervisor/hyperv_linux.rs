@@ -55,7 +55,7 @@ use crate::hypervisor::hypervisor_handler::HypervisorHandler;
 use crate::hypervisor::HyperlightExit;
 use crate::mem::memory_region::{MemoryRegion, MemoryRegionFlags};
 use crate::mem::ptr::{GuestPtr, RawPtr};
-use crate::{log_then_return, new_error, Result};
+use crate::{log_then_return, new_error, HyperlightError, Result};
 
 /// Determine whether the HyperV for Linux hypervisor API is present
 /// and functional.
@@ -323,7 +323,11 @@ impl Hypervisor for HypervLinuxDriver {
                     HyperlightExit::Halt()
                 }
                 IO_PORT_INTERCEPT_MESSAGE => {
-                    let io_message = m.to_ioport_info()?;
+                    let io_message = m.to_ioport_info();
+                    if let Err(e) = io_message {
+                        return Err(HyperlightError::Error("something went wrong".to_string()));
+                    }
+                    let io_message = io_message.unwrap();
                     let port_number = io_message.port_number;
                     let rip = io_message.header.rip;
                     let rax = io_message.rax;
@@ -337,7 +341,11 @@ impl Hypervisor for HypervLinuxDriver {
                     )
                 }
                 UNMAPPED_GPA_MESSAGE => {
-                    let mimo_message = m.to_memory_info()?;
+                    let mimo_message = m.to_memory_info();
+                    if let Err(e) = mimo_message {
+                        return Err(HyperlightError::Error("something went wrong".to_string()));
+                    }
+                    let mimo_message = mimo_message.unwrap();
                     let addr = mimo_message.guest_physical_address;
                     crate::debug!(
                         "mshv MMIO unmapped GPA -Details: Address: {} \n {:#?}",
@@ -347,7 +355,11 @@ impl Hypervisor for HypervLinuxDriver {
                     HyperlightExit::Mmio(addr)
                 }
                 INVALID_GPA_ACCESS_MESSAGE => {
-                    let mimo_message = m.to_memory_info()?;
+                    let mimo_message = m.to_memory_info();
+                    if let Err(e) = mimo_message {
+                        return Err(HyperlightError::Error("something went wrong".to_string()));
+                    }
+                    let mimo_message = mimo_message.unwrap();
                     let gpa = mimo_message.guest_physical_address;
                     let access_info = MemoryRegionFlags::try_from(mimo_message)?;
                     crate::debug!(
