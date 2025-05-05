@@ -256,7 +256,7 @@ pub fn emit_hl_unmarshal_value(s: &mut State, id: Ident, vt: &Value) -> TokenStr
                         // todo: better error handling
                         panic!("");
                     };
-                    (*v, 4)
+                    (v, 4)
                 }
             }
         }
