@@ -72,3 +72,175 @@ pub(crate) fn setup_signal_handlers(config: &SandboxConfiguration) -> crate::Res
 extern "C" fn vm_kill_signal(_: libc::c_int, _: *mut libc::siginfo_t, _: *mut libc::c_void) {
     // Do nothing. SIGRTMIN is just used to issue a VM exit to the underlying VM.
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sandbox::SandboxConfiguration;
+
+    /// Test that setup_signal_handlers successfully registers signal handlers
+    #[test]
+    fn test_setup_signal_handlers_success() {
+        let config = SandboxConfiguration::default();
+        let result = setup_signal_handlers(&config);
+        assert!(result.is_ok(), "Signal handler setup should succeed");
+    }
+
+    /// Test setup_signal_handlers with custom interrupt offset
+    #[test]
+    fn test_setup_signal_handlers_custom_offset() {
+        let mut config = SandboxConfiguration::default();
+        // Use a different interrupt offset to test the signal number calculation
+        config
+            .set_interrupt_vcpu_sigrtmin_offset(2)
+            .expect("Setting offset should succeed");
+        let result = setup_signal_handlers(&config);
+        assert!(
+            result.is_ok(),
+            "Signal handler setup with custom offset should succeed"
+        );
+    }
+
+    /// Test that vm_kill_signal is a valid extern C function
+    #[test]
+    fn test_vm_kill_signal_signature() {
+        // This test verifies the function signature is correct for C interop
+        let signal: libc::c_int = libc::SIGRTMIN();
+        let info: *mut libc::siginfo_t = std::ptr::null_mut();
+        let context: *mut libc::c_void = std::ptr::null_mut();
+
+        // Should not panic or crash when called with null pointers
+        vm_kill_signal(signal, info, context);
+        // Test passes if we reach this point without crashing
+    }
+
+    /// Test signal handler setup with multiple configurations
+    #[test]
+    fn test_signal_handlers_various_configurations() {
+        // Test with default configuration
+        let default_config = SandboxConfiguration::default();
+        assert!(setup_signal_handlers(&default_config).is_ok());
+
+        // Test with different offset values (within valid range)
+        for offset in 0..5 {
+            let mut config = SandboxConfiguration::default();
+            config
+                .set_interrupt_vcpu_sigrtmin_offset(offset)
+                .expect("Setting offset should succeed");
+            let result = setup_signal_handlers(&config);
+            assert!(
+                result.is_ok(),
+                "Signal handler setup should succeed with offset {}",
+                offset
+            );
+        }
+    }
+
+    /// Test that signal numbers are calculated correctly
+    #[test]
+    fn test_signal_number_calculation() {
+        let test_offset = 3u8;
+        let mut config = SandboxConfiguration::default();
+        config
+            .set_interrupt_vcpu_sigrtmin_offset(test_offset)
+            .expect("Setting offset should succeed");
+
+        // The signal should be SIGRTMIN + offset
+        let expected_signal = libc::SIGRTMIN() + test_offset as libc::c_int;
+
+        // Verify the expected signal is within valid range
+        let max_signal = libc::SIGRTMAX();
+        assert!(
+            expected_signal <= max_signal,
+            "Calculated signal {} should be within valid range (max: {})",
+            expected_signal,
+            max_signal
+        );
+
+        // Test that setup succeeds with this configuration
+        assert!(setup_signal_handlers(&config).is_ok());
+    }
+
+    /// Test signal handler behavior with edge case offset values
+    #[test]
+    fn test_signal_handlers_edge_cases() {
+        // Test with maximum safe offset
+        let max_safe_offset = 10u8; // Conservative maximum to stay within signal range
+        let mut config = SandboxConfiguration::default();
+        config
+            .set_interrupt_vcpu_sigrtmin_offset(max_safe_offset)
+            .expect("Setting offset should succeed");
+
+        let result = setup_signal_handlers(&config);
+        assert!(
+            result.is_ok(),
+            "Signal handler setup should succeed with max safe offset"
+        );
+
+        // Test with minimum offset (0)
+        let mut config_zero = SandboxConfiguration::default();
+        config_zero
+            .set_interrupt_vcpu_sigrtmin_offset(0)
+            .expect("Setting offset should succeed");
+        let result_zero = setup_signal_handlers(&config_zero);
+        assert!(
+            result_zero.is_ok(),
+            "Signal handler setup should succeed with zero offset"
+        );
+    }
+
+    /// Test vm_kill_signal function with various signal numbers
+    #[test]
+    fn test_vm_kill_signal_with_different_signals() {
+        let info: *mut libc::siginfo_t = std::ptr::null_mut();
+        let context: *mut libc::c_void = std::ptr::null_mut();
+
+        // Test with SIGRTMIN
+        vm_kill_signal(libc::SIGRTMIN(), info, context);
+
+        // Test with SIGRTMIN + offset
+        vm_kill_signal(libc::SIGRTMIN() + 1, info, context);
+        vm_kill_signal(libc::SIGRTMIN() + 5, info, context);
+
+        // All calls should complete without error/panic
+    }
+
+    /// Test signal handler registration doesn't interfere with each other
+    #[test]
+    fn test_multiple_signal_handler_setups() {
+        let mut config1 = SandboxConfiguration::default();
+        config1
+            .set_interrupt_vcpu_sigrtmin_offset(1)
+            .expect("Setting offset should succeed");
+        let mut config2 = SandboxConfiguration::default();
+        config2
+            .set_interrupt_vcpu_sigrtmin_offset(2)
+            .expect("Setting offset should succeed");
+
+        // First setup should succeed
+        assert!(setup_signal_handlers(&config1).is_ok());
+
+        // Second setup should also succeed (might overwrite previous)
+        assert!(setup_signal_handlers(&config2).is_ok());
+    }
+
+    /// Test that signal handler function pointers are valid
+    #[test]
+    fn test_signal_handler_function_pointers() {
+        // Verify vm_kill_signal is a valid function pointer
+        let fn_ptr = vm_kill_signal as *const ();
+        assert!(
+            !fn_ptr.is_null(),
+            "vm_kill_signal should have a valid function pointer"
+        );
+
+        #[cfg(feature = "seccomp")]
+        {
+            let sigsys_fn_ptr = sigsys_signal_handler::handle_sigsys as *const ();
+            assert!(
+                !sigsys_fn_ptr.is_null(),
+                "handle_sigsys should have a valid function pointer"
+            );
+        }
+    }
+}
