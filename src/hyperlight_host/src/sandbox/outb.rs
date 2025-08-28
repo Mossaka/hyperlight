@@ -405,16 +405,23 @@ pub(crate) fn handle_outb(
 }
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use hyperlight_common::flatbuffer_wrappers::guest_error::ErrorCode;
     use hyperlight_common::flatbuffer_wrappers::guest_log_level::LogLevel;
+    use hyperlight_common::outb::{Exception, OutBAction};
     use hyperlight_testing::logger::{LOGGER, Logger};
     use log::Level;
     use tracing_core::callsite::rebuild_interest_cache;
 
-    use super::outb_log;
+    use super::{ABORT_TERMINATOR, MAX_ABORT_BUFFER_LEN, handle_outb, outb_abort, outb_log};
+    use crate::HyperlightError;
     use crate::mem::layout::SandboxMemoryLayout;
     use crate::mem::mgr::SandboxMemoryManager;
     use crate::mem::shared_mem::SharedMemory;
     use crate::sandbox::SandboxConfiguration;
+    use crate::sandbox::host_funcs::FunctionRegistry;
+    use crate::sandbox::mem_mgr::MemMgrWrapper;
     use crate::sandbox::outb::GuestLogData;
     use crate::testing::log_values::test_value_as_str;
     use crate::testing::simple_guest_exe_info;
@@ -666,5 +673,382 @@ mod tests {
                 });
             }
         });
+    }
+
+    // Helper function to create a test memory manager
+    fn create_test_mem_mgr() -> MemMgrWrapper<crate::mem::shared_mem::HostSharedMemory> {
+        let sandbox_cfg = SandboxConfiguration::default();
+        let exe_info = simple_guest_exe_info().unwrap();
+        let (mut mgr, _) =
+            SandboxMemoryManager::load_guest_binary_into_memory(sandbox_cfg, exe_info, None)
+                .unwrap();
+        let mem_size = mgr.get_shared_mem_mut().mem_size();
+        let layout = mgr.layout;
+        let shared_mem = mgr.get_shared_mem_mut();
+        layout
+            .write(shared_mem, SandboxMemoryLayout::BASE_ADDRESS, mem_size)
+            .unwrap();
+        let (hmgr, _) = mgr.build();
+        // Create a dummy stack cookie for testing
+        let stack_cookie = [0u8; 16]; // STACK_COOKIE_LEN is 16
+        MemMgrWrapper::new(hmgr, stack_cookie)
+    }
+
+    // Tests for outb_abort function
+    #[test]
+    fn test_outb_abort_stack_overflow() {
+        let mut mem_mgr = create_test_mem_mgr();
+
+        // Set up buffer with stack overflow error code and terminator
+        let buffer = mem_mgr.get_abort_buffer_mut();
+        buffer.clear();
+        buffer.push(ErrorCode::StackOverflow as u8);
+
+        // Create data with terminator in second byte
+        let data = u32::from_le_bytes([1, ABORT_TERMINATOR, 0, 0]);
+
+        let result = outb_abort(&mut mem_mgr, data);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            HyperlightError::StackOverflow() => {}
+            _ => panic!("Expected StackOverflow error"),
+        }
+
+        // Buffer should be cleared after processing
+        assert!(mem_mgr.get_abort_buffer_mut().is_empty());
+    }
+
+    #[test]
+    fn test_outb_abort_guest_aborted_with_exception() {
+        let mut mem_mgr = create_test_mem_mgr();
+
+        // Set up buffer with error code, exception, and message
+        let buffer = mem_mgr.get_abort_buffer_mut();
+        buffer.clear();
+        buffer.push(5); // Some error code
+        buffer.push(Exception::PageFault as u8);
+        buffer.extend_from_slice(b"Test error message");
+
+        let data = u32::from_le_bytes([1, ABORT_TERMINATOR, 0, 0]);
+
+        let result = outb_abort(&mut mem_mgr, data);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            HyperlightError::GuestAborted(code, msg) => {
+                assert_eq!(code, 5);
+                assert!(msg.contains("PageFault"));
+                assert!(msg.contains("Test error message"));
+            }
+            _ => panic!("Expected GuestAborted error"),
+        }
+
+        assert!(mem_mgr.get_abort_buffer_mut().is_empty());
+    }
+
+    #[test]
+    fn test_outb_abort_guest_aborted_invalid_exception() {
+        let mut mem_mgr = create_test_mem_mgr();
+
+        let buffer = mem_mgr.get_abort_buffer_mut();
+        buffer.clear();
+        buffer.push(3); // Error code
+        buffer.push(255); // Invalid exception code  
+        buffer.extend_from_slice(b"Test message");
+
+        let data = u32::from_le_bytes([1, ABORT_TERMINATOR, 0, 0]);
+
+        let result = outb_abort(&mut mem_mgr, data);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            HyperlightError::GuestAborted(code, msg) => {
+                assert_eq!(code, 3);
+                // The message includes the invalid exception byte (255) which is not valid UTF-8
+                // so it gets converted using lossy conversion
+                assert!(msg.contains("Test message"));
+                assert!(msg.len() >= "Test message".len()); // Should be longer due to the invalid byte
+            }
+            _ => panic!("Expected GuestAborted error"),
+        }
+    }
+
+    #[test]
+    fn test_outb_abort_guest_aborted_no_exception() {
+        let mut mem_mgr = create_test_mem_mgr();
+
+        let buffer = mem_mgr.get_abort_buffer_mut();
+        buffer.clear();
+        buffer.push(7); // Error code only
+
+        let data = u32::from_le_bytes([1, ABORT_TERMINATOR, 0, 0]);
+
+        let result = outb_abort(&mut mem_mgr, data);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            HyperlightError::GuestAborted(code, msg) => {
+                assert_eq!(code, 7);
+                assert!(msg.is_empty());
+            }
+            _ => panic!("Expected GuestAborted error"),
+        }
+    }
+
+    #[test]
+    fn test_outb_abort_buffer_overflow() {
+        let mut mem_mgr = create_test_mem_mgr();
+
+        // Fill buffer to near capacity
+        let buffer = mem_mgr.get_abort_buffer_mut();
+        buffer.clear();
+        buffer.resize(MAX_ABORT_BUFFER_LEN, b'X');
+
+        // Try to add more data
+        let data = u32::from_le_bytes([1, b'Y', 0, 0]);
+
+        let result = outb_abort(&mut mem_mgr, data);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            HyperlightError::GuestAborted(code, msg) => {
+                assert_eq!(code, 0);
+                assert!(msg.contains("buffer overflowed"));
+            }
+            _ => panic!("Expected buffer overflow error"),
+        }
+
+        // Buffer should be cleared
+        assert!(mem_mgr.get_abort_buffer_mut().is_empty());
+    }
+
+    #[test]
+    fn test_outb_abort_no_terminator() {
+        let mut mem_mgr = create_test_mem_mgr();
+
+        // Send data without terminator
+        let data = u32::from_le_bytes([3, b'A', b'B', b'C']);
+
+        let result = outb_abort(&mut mem_mgr, data);
+        assert!(result.is_ok());
+
+        // Data should be added to buffer
+        let buffer = mem_mgr.get_abort_buffer_mut();
+        assert_eq!(buffer, &[b'A', b'B', b'C']);
+    }
+
+    #[test]
+    fn test_outb_abort_partial_data() {
+        let mut mem_mgr = create_test_mem_mgr();
+
+        // Send data with length 2, which means 2 bytes after the length byte will be processed
+        let data = u32::from_le_bytes([2, b'X', 0, 0]);
+
+        let result = outb_abort(&mut mem_mgr, data);
+        assert!(result.is_ok());
+
+        // Both bytes should be added (X and 0)
+        let buffer = mem_mgr.get_abort_buffer_mut();
+        assert_eq!(buffer, &[b'X', 0]);
+    }
+
+    #[test]
+    fn test_outb_abort_zero_length() {
+        let mut mem_mgr = create_test_mem_mgr();
+
+        let data = u32::from_le_bytes([0, b'X', b'Y', b'Z']);
+
+        let result = outb_abort(&mut mem_mgr, data);
+        assert!(result.is_ok());
+
+        // No data should be added to buffer
+        let buffer = mem_mgr.get_abort_buffer_mut();
+        assert!(buffer.is_empty());
+    }
+
+    // Tests for handle_outb function
+    #[test]
+    fn test_handle_outb_log() {
+        Logger::initialize_test_logger();
+        let mut mem_mgr = create_test_mem_mgr();
+        let host_funcs = Arc::new(Mutex::new(FunctionRegistry::default()));
+
+        // Set up log data
+        let log_data = new_guest_log_data(LogLevel::Information);
+        let guest_log_data_buffer: Vec<u8> = log_data.try_into().unwrap();
+        let layout = mem_mgr.as_ref().layout;
+        let sandbox_cfg = SandboxConfiguration::default();
+
+        mem_mgr
+            .as_mut()
+            .get_shared_mem_mut()
+            .push_buffer(
+                layout.get_output_data_offset(),
+                sandbox_cfg.get_output_data_size(),
+                &guest_log_data_buffer,
+            )
+            .unwrap();
+
+        let result = handle_outb(&mut mem_mgr, host_funcs, OutBAction::Log as u16, 0);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_outb_debug_print_valid_char() {
+        let mut mem_mgr = create_test_mem_mgr();
+        let host_funcs = Arc::new(Mutex::new(FunctionRegistry::default()));
+
+        let result = handle_outb(
+            &mut mem_mgr,
+            host_funcs,
+            OutBAction::DebugPrint as u16,
+            b'A' as u32,
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_outb_debug_print_invalid_char() {
+        let mut mem_mgr = create_test_mem_mgr();
+        let host_funcs = Arc::new(Mutex::new(FunctionRegistry::default()));
+
+        let result = handle_outb(
+            &mut mem_mgr,
+            host_funcs,
+            OutBAction::DebugPrint as u16,
+            0xFFFFFFFF, // Invalid Unicode character
+        );
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid character")
+        );
+    }
+
+    #[test]
+    fn test_handle_outb_abort() {
+        let mut mem_mgr = create_test_mem_mgr();
+        let host_funcs = Arc::new(Mutex::new(FunctionRegistry::default()));
+
+        // Setup abort buffer with stack overflow
+        let buffer = mem_mgr.get_abort_buffer_mut();
+        buffer.clear();
+        buffer.push(ErrorCode::StackOverflow as u8);
+
+        let data = u32::from_le_bytes([1, ABORT_TERMINATOR, 0, 0]);
+
+        let result = handle_outb(&mut mem_mgr, host_funcs, OutBAction::Abort as u16, data);
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            HyperlightError::StackOverflow() => {}
+            _ => panic!("Expected StackOverflow error"),
+        }
+    }
+
+    #[test]
+    fn test_handle_outb_call_function_error() {
+        let mut mem_mgr = create_test_mem_mgr();
+        let host_funcs = Arc::new(Mutex::new(FunctionRegistry::default()));
+
+        // Test calling function without proper function call data in buffer
+        let result = handle_outb(&mut mem_mgr, host_funcs, OutBAction::CallFunction as u16, 0);
+
+        // Should error because there's no valid function call data
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_handle_outb_invalid_port() {
+        let mut mem_mgr = create_test_mem_mgr();
+        let host_funcs = Arc::new(Mutex::new(FunctionRegistry::default()));
+
+        let result = handle_outb(
+            &mut mem_mgr,
+            host_funcs,
+            9999, // Invalid port
+            0,
+        );
+
+        assert!(result.is_err());
+    }
+
+    // Test various OutBAction conversions
+    #[test]
+    fn test_outb_action_conversions() {
+        assert_eq!(OutBAction::Log as u16, 99);
+        assert_eq!(OutBAction::CallFunction as u16, 101);
+        assert_eq!(OutBAction::Abort as u16, 102);
+        assert_eq!(OutBAction::DebugPrint as u16, 103);
+
+        // Test TryFrom conversions
+        use std::convert::TryFrom;
+        assert!(matches!(OutBAction::try_from(99), Ok(OutBAction::Log)));
+        assert!(matches!(
+            OutBAction::try_from(101),
+            Ok(OutBAction::CallFunction)
+        ));
+        assert!(matches!(OutBAction::try_from(102), Ok(OutBAction::Abort)));
+        assert!(matches!(
+            OutBAction::try_from(103),
+            Ok(OutBAction::DebugPrint)
+        ));
+        assert!(OutBAction::try_from(9999).is_err());
+    }
+
+    // Test constants
+    #[test]
+    fn test_constants() {
+        assert_eq!(ABORT_TERMINATOR, 0xFF);
+        assert_eq!(MAX_ABORT_BUFFER_LEN, 1024);
+    }
+
+    // Test edge cases for buffer operations
+    #[test]
+    fn test_outb_abort_edge_cases() {
+        let mut mem_mgr = create_test_mem_mgr();
+
+        // Test with maximum length (3)
+        let data = u32::from_le_bytes([3, b'A', b'B', b'C']);
+        let result = outb_abort(&mut mem_mgr, data);
+        assert!(result.is_ok());
+        assert_eq!(mem_mgr.get_abort_buffer_mut(), &[b'A', b'B', b'C']);
+
+        mem_mgr.get_abort_buffer_mut().clear();
+
+        // Test with length > 3 (should be clamped to 3)
+        let data = u32::from_le_bytes([5, b'X', b'Y', b'Z']);
+        let result = outb_abort(&mut mem_mgr, data);
+        assert!(result.is_ok());
+        assert_eq!(mem_mgr.get_abort_buffer_mut(), &[b'X', b'Y', b'Z']);
+    }
+
+    // Test multiple abort buffer operations
+    #[test]
+    fn test_outb_abort_multiple_operations() {
+        let mut mem_mgr = create_test_mem_mgr();
+
+        // First add some data
+        let data1 = u32::from_le_bytes([2, b'H', b'i', 0]);
+        let result = outb_abort(&mut mem_mgr, data1);
+        assert!(result.is_ok());
+        assert_eq!(mem_mgr.get_abort_buffer_mut(), &[b'H', b'i']);
+
+        // Add more data
+        let data2 = u32::from_le_bytes([2, b'!', b'!', 0]);
+        let result = outb_abort(&mut mem_mgr, data2);
+        assert!(result.is_ok());
+        assert_eq!(mem_mgr.get_abort_buffer_mut(), &[b'H', b'i', b'!', b'!']);
+
+        // Now send terminator with error
+        let buffer = mem_mgr.get_abort_buffer_mut();
+        buffer.insert(0, 9); // Insert error code at beginning
+        let data3 = u32::from_le_bytes([1, ABORT_TERMINATOR, 0, 0]);
+        let result = outb_abort(&mut mem_mgr, data3);
+        assert!(result.is_err());
+
+        // Buffer should be cleared
+        assert!(mem_mgr.get_abort_buffer_mut().is_empty());
     }
 }
