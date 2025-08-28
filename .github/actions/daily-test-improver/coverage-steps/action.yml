@@ -1,0 +1,59 @@
+name: 'Coverage Steps'
+description: 'Build project, run tests, and produce coverage report'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: 1.86
+        components: llvm-tools-preview
+      shell: bash
+
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
+      shell: bash
+
+    - name: Install just
+      uses: taiki-e/install-action@just
+      shell: bash
+
+    - name: Build rust guest binaries
+      run: |
+        just build-rust-guests debug
+        just move-rust-guests debug
+      shell: bash
+
+    - name: Build c guest binaries  
+      run: |
+        just build-c-guests debug
+        just move-c-guests debug
+      shell: bash
+
+    - name: Build main project
+      run: just build debug
+      shell: bash
+
+    - name: Run tests with coverage
+      run: |
+        # Run unit tests with coverage
+        cargo llvm-cov --workspace --lcov --output-path coverage.lcov test --lib
+        
+        # Run integration tests with coverage (append to existing coverage)
+        cargo llvm-cov --workspace --lcov --output-path coverage.lcov --no-clean test --test "*"
+        
+        # Generate additional coverage formats
+        cargo llvm-cov --workspace --html --output-dir coverage-html --no-clean
+        cargo llvm-cov --workspace --json --output-path coverage.json --no-clean
+      shell: bash
+
+    - name: Upload coverage report as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: |
+          coverage.lcov
+          coverage.json 
+          coverage-html/
+        retention-days: 30
