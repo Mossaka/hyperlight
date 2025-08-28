@@ -1,0 +1,114 @@
+name: 'Coverage Steps'
+description: 'Build the project, run tests, and generate coverage reports'
+outputs:
+  coverage-report-path:
+    description: 'Path to the coverage report'
+    value: ${{ steps.coverage.outputs.coverage-report-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install coverage tools
+      shell: bash
+      run: |
+        # Install cargo-llvm-cov for coverage reporting
+        cargo install cargo-llvm-cov --locked
+
+    - name: Install just
+      shell: bash
+      run: |
+        # Install just for build automation
+        cargo install just --locked
+
+    - name: Setup build dependencies
+      shell: bash
+      run: |
+        # Install nightly rust for formatting
+        rustup toolchain install nightly
+        rustup component add rustfmt --toolchain nightly
+        
+        # Install wasm-tools for wit guest
+        cargo install --locked wasm-tools
+
+    - name: Build guest binaries
+      shell: bash
+      run: |
+        # Build and move guest binaries for testing
+        just build-rust-guests debug
+        just move-rust-guests debug
+        just build-c-guests debug  
+        just move-c-guests debug
+
+    - name: Build main project
+      shell: bash
+      run: |
+        # Build the main project in debug mode
+        just build debug
+
+    - name: Generate coverage report
+      id: coverage
+      shell: bash
+      run: |
+        # Use cargo-llvm-cov to run tests with coverage
+        # Focus on the main packages and exclude guest binaries from coverage
+        cargo llvm-cov \
+          --profile dev \
+          --workspace \
+          --exclude hyperlight-guest-bin \
+          --exclude callbackguest \
+          --exclude dummyguest \
+          --exclude simpleguest \
+          --exclude witguest \
+          --lcov \
+          --output-path coverage.lcov \
+          test --lib
+          
+        # Also run integration tests with coverage
+        GUEST=rust cargo llvm-cov \
+          --profile dev \
+          --no-clean \
+          --lcov \
+          --output-path coverage-integration.lcov \
+          test --test integration_test
+          
+        # Generate HTML coverage report for easier analysis
+        cargo llvm-cov \
+          --profile dev \
+          --workspace \
+          --exclude hyperlight-guest-bin \
+          --exclude callbackguest \
+          --exclude dummyguest \
+          --exclude simpleguest \
+          --exclude witguest \
+          --html \
+          --output-dir coverage-html \
+          test --lib
+        
+        # Create a summary coverage report
+        cargo llvm-cov \
+          --profile dev \
+          --workspace \
+          --exclude hyperlight-guest-bin \
+          --exclude callbackguest \
+          --exclude dummyguest \
+          --exclude simpleguest \
+          --exclude witguest \
+          --summary-only \
+          test --lib > coverage-summary.txt
+        
+        echo "coverage-report-path=coverage-html" >> $GITHUB_OUTPUT
+        
+        # Display summary
+        echo "Coverage Summary:"
+        cat coverage-summary.txt
+
+    - name: Upload coverage artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: |
+          coverage.lcov
+          coverage-integration.lcov
+          coverage-html/
+          coverage-summary.txt
+        retention-days: 30
