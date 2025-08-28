@@ -317,3 +317,355 @@ macro_rules! new_error {
            $crate::error::HyperlightError::Error(__err_msg)
     }};
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use hyperlight_common::flatbuffer_wrappers::function_types::{ParameterValue, ReturnValue};
+    use hyperlight_common::flatbuffer_wrappers::guest_error::ErrorCode;
+
+    use super::*;
+    use crate::mem::memory_region::MemoryRegionFlags;
+    use crate::mem::ptr::RawPtr;
+
+    #[test]
+    fn test_bounds_check_failed_error() {
+        let error = HyperlightError::BoundsCheckFailed(100, 50);
+        assert_eq!(
+            format!("{}", error),
+            "Offset: 100 out of bounds, Max is: 50"
+        );
+    }
+
+    #[test]
+    fn test_checked_add_overflow_error() {
+        let error = HyperlightError::CheckedAddOverflow(0xFFFFFFFFFFFFFFFF, 1);
+        assert_eq!(
+            format!("{}", error),
+            "Couldn't add offset to base address. Offset: 18446744073709551615, Base Address: 1"
+        );
+    }
+
+    #[test]
+    fn test_execution_access_violation_error() {
+        let error = HyperlightError::ExecutionAccessViolation(0x1000);
+        assert_eq!(
+            format!("{}", error),
+            "Non-executable address 0x1000 tried to be executed"
+        );
+    }
+
+    #[test]
+    fn test_execution_canceled_by_host_error() {
+        let error = HyperlightError::ExecutionCanceledByHost();
+        assert_eq!(format!("{}", error), "Execution was cancelled by the host.");
+    }
+
+    #[test]
+    fn test_guest_aborted_error() {
+        let error = HyperlightError::GuestAborted(1, "Test abort message".to_string());
+        assert_eq!(format!("{}", error), "Guest aborted: 1 Test abort message");
+    }
+
+    #[test]
+    fn test_guest_error() {
+        let error = HyperlightError::GuestError(
+            ErrorCode::GuestFunctionNotFound,
+            "Test guest error".to_string(),
+        );
+        assert_eq!(
+            format!("{}", error),
+            "Guest error occurred GuestFunctionNotFound: Test guest error"
+        );
+    }
+
+    #[test]
+    fn test_host_function_not_found_error() {
+        let error = HyperlightError::HostFunctionNotFound("test_function".to_string());
+        assert_eq!(
+            format!("{}", error),
+            "HostFunction test_function was not found"
+        );
+    }
+
+    #[test]
+    fn test_guest_offset_invalid_error() {
+        let error = HyperlightError::GuestOffsetIsInvalid(12345);
+        assert_eq!(format!("{}", error), "The guest offset 12345 is invalid.");
+    }
+
+    #[test]
+    fn test_memory_access_violation_error() {
+        let error = HyperlightError::MemoryAccessViolation(
+            0x1000,
+            MemoryRegionFlags::READ,
+            MemoryRegionFlags::WRITE,
+        );
+        assert!(format!("{}", error).contains("Memory Access Violation at address 0x1000"));
+    }
+
+    #[test]
+    fn test_memory_allocation_failed_error() {
+        let error = HyperlightError::MemoryAllocationFailed(Some(12));
+        assert_eq!(
+            format!("{}", error),
+            "Memory Allocation Failed with OS Error Some(12)."
+        );
+
+        let error_none = HyperlightError::MemoryAllocationFailed(None);
+        assert_eq!(
+            format!("{}", error_none),
+            "Memory Allocation Failed with OS Error None."
+        );
+    }
+
+    #[test]
+    fn test_memory_protection_failed_error() {
+        let error = HyperlightError::MemoryProtectionFailed(Some(13));
+        assert_eq!(
+            format!("{}", error),
+            "Memory Protection Failed with OS Error Some(13)."
+        );
+    }
+
+    #[test]
+    fn test_memory_request_too_big_error() {
+        let error = HyperlightError::MemoryRequestTooBig(1024, 512);
+        assert_eq!(
+            format!("{}", error),
+            "Memory requested 1024 exceeds maximum size allowed 512"
+        );
+    }
+
+    #[test]
+    fn test_stack_overflow_error() {
+        let error = HyperlightError::StackOverflow();
+        assert_eq!(format!("{}", error), "Stack overflow detected");
+    }
+
+    #[test]
+    fn test_no_hypervisor_found_error() {
+        let error = HyperlightError::NoHypervisorFound();
+        assert_eq!(format!("{}", error), "No Hypervisor was found for Sandbox");
+    }
+
+    #[test]
+    fn test_no_memory_snapshot_error() {
+        let error = HyperlightError::NoMemorySnapshot;
+        assert_eq!(
+            format!("{}", error),
+            "Restore_state called with no valid snapshot"
+        );
+    }
+
+    #[test]
+    fn test_snapshot_sandbox_mismatch_error() {
+        let error = HyperlightError::SnapshotSandboxMismatch;
+        assert_eq!(
+            format!("{}", error),
+            "Snapshot was taken from a different sandbox"
+        );
+    }
+
+    #[test]
+    fn test_unexpected_no_of_arguments_error() {
+        let error = HyperlightError::UnexpectedNoOfArguments(3, 2);
+        assert_eq!(
+            format!("{}", error),
+            "The number of arguments to the function is wrong: got 3 expected 2"
+        );
+    }
+
+    #[test]
+    fn test_vector_capacity_incorrect_error() {
+        let error = HyperlightError::VectorCapacityIncorrect(100, 50, 200);
+        assert_eq!(
+            format!("{}", error),
+            "The capacity of the vector is incorrect. Capacity: 100, Length: 50, FlatBuffer Size: 200"
+        );
+    }
+
+    #[test]
+    fn test_parameter_value_conversion_failure_error() {
+        let param = ParameterValue::Int(42);
+        let error = HyperlightError::ParameterValueConversionFailure(param, "String");
+        assert!(format!("{}", error).contains("Failed To Convert Parameter Value"));
+    }
+
+    #[test]
+    fn test_return_value_conversion_failure_error() {
+        let ret_val = ReturnValue::Int(42);
+        let error = HyperlightError::ReturnValueConversionFailure(ret_val, "String");
+        assert!(format!("{}", error).contains("Failed To Convert Return Value"));
+    }
+
+    #[test]
+    fn test_raw_pointer_less_than_base_address_error() {
+        let raw_ptr = RawPtr::from(0x1000u64);
+        let error = HyperlightError::RawPointerLessThanBaseAddress(raw_ptr, 0x2000);
+        assert!(format!("{}", error).contains("Raw pointer"));
+        assert!(format!("{}", error).contains("was less than the base address"));
+    }
+
+    #[test]
+    fn test_guest_interface_unsupported_type_error() {
+        let error = HyperlightError::GuestInterfaceUnsupportedType("CustomType".to_string());
+        assert_eq!(format!("{}", error), "Unsupported type: CustomType");
+    }
+
+    #[test]
+    fn test_unexpected_parameter_value_type_error() {
+        let param = ParameterValue::Int(42);
+        let error =
+            HyperlightError::UnexpectedParameterValueType(param, "Expected String".to_string());
+        assert!(format!("{}", error).contains("The parameter value type is unexpected"));
+    }
+
+    #[test]
+    fn test_unexpected_return_value_type_error() {
+        let ret_val = ReturnValue::Int(42);
+        let error =
+            HyperlightError::UnexpectedReturnValueType(ret_val, "Expected String".to_string());
+        assert!(format!("{}", error).contains("The return value type is unexpected"));
+    }
+
+    #[test]
+    fn test_generic_error_from_str() {
+        let error: HyperlightError = "Test error message".into();
+        assert_eq!(format!("{}", error), "Test error message");
+    }
+
+    #[test]
+    fn test_generic_error_from_string() {
+        let error = HyperlightError::Error("Test error".to_string());
+        assert_eq!(format!("{}", error), "Test error");
+    }
+
+    #[test]
+    fn test_mutex_poison_error_conversion() {
+        // Create a mutex and poison it
+        let mutex = Arc::new(Mutex::new(42));
+        let mutex_clone = Arc::clone(&mutex);
+
+        // Spawn a thread that panics while holding the mutex
+        let handle = std::thread::spawn(move || {
+            let _guard = mutex_clone.lock().unwrap();
+            panic!("This will poison the mutex");
+        });
+
+        // Wait for the thread to finish (and panic)
+        let _ = handle.join();
+
+        // Now try to lock the poisoned mutex and convert the error
+        let lock_result = mutex.lock();
+        assert!(lock_result.is_err());
+
+        let hyperlight_error: HyperlightError = lock_result.unwrap_err().into();
+        match hyperlight_error {
+            HyperlightError::LockAttemptFailed(_) => {
+                // Test passes
+            }
+            _ => panic!("Expected LockAttemptFailed error"),
+        }
+    }
+
+    #[test]
+    fn test_failed_to_get_value_from_parameter_error() {
+        let error = HyperlightError::FailedToGetValueFromParameter();
+        assert_eq!(
+            format!("{}", error),
+            "Failed to get a value from flat buffer parameter"
+        );
+    }
+
+    #[test]
+    fn test_field_missing_in_guest_log_data_error() {
+        let error = HyperlightError::FieldIsMissingInGuestLogData("test_field".to_string());
+        assert_eq!(
+            format!("{}", error),
+            "Field Name test_field not found in decoded GuestLogData"
+        );
+    }
+
+    #[test]
+    fn test_guest_function_call_already_in_progress_error() {
+        let error = HyperlightError::GuestFunctionCallAlreadyInProgress();
+        assert_eq!(format!("{}", error), "Guest call is already in progress");
+    }
+
+    #[test]
+    fn test_guest_execution_hung_on_host_function_call_error() {
+        let error = HyperlightError::GuestExecutionHungOnHostFunctionCall();
+        assert_eq!(
+            format!("{}", error),
+            "Guest execution hung on the execution of a host function call"
+        );
+    }
+
+    #[test]
+    fn test_lock_attempt_failed_error() {
+        let error = HyperlightError::LockAttemptFailed("test lock failure".to_string());
+        assert_eq!(format!("{}", error), "Unable to lock resource");
+    }
+
+    #[test]
+    fn test_metric_not_found_error() {
+        let error = HyperlightError::MetricNotFound("test_metric");
+        assert_eq!(format!("{}", error), "Metric Not Found \"test_metric\".");
+    }
+
+    #[test]
+    fn test_mmap_failed_error() {
+        let error = HyperlightError::MmapFailed(Some(42));
+        assert_eq!(format!("{}", error), "mmap failed with os error Some(42)");
+
+        let error_none = HyperlightError::MmapFailed(None);
+        assert_eq!(format!("{}", error_none), "mmap failed with os error None");
+    }
+
+    #[test]
+    fn test_mprotect_failed_error() {
+        let error = HyperlightError::MprotectFailed(Some(42));
+        assert_eq!(
+            format!("{}", error),
+            "mprotect failed with os error Some(42)"
+        );
+
+        let error_none = HyperlightError::MprotectFailed(None);
+        assert_eq!(
+            format!("{}", error_none),
+            "mprotect failed with os error None"
+        );
+    }
+
+    #[test]
+    fn test_new_error_macro_simple() {
+        let error = new_error!("Simple error message");
+        match error {
+            HyperlightError::Error(msg) => assert_eq!(msg, "Simple error message"),
+            _ => panic!("Expected Error variant"),
+        }
+    }
+
+    #[test]
+    fn test_new_error_macro_formatted() {
+        let error = new_error!("Formatted error: {} {}", "test", 42);
+        match error {
+            HyperlightError::Error(msg) => assert_eq!(msg, "Formatted error: test 42"),
+            _ => panic!("Expected Error variant"),
+        }
+    }
+
+    #[test]
+    fn test_from_infallible() {
+        // This test is a bit artificial since Infallible can never actually be constructed,
+        // but we can test the conversion function exists and compiles
+        fn test_conversion(inf: std::convert::Infallible) -> HyperlightError {
+            inf.into()
+        }
+
+        // The function compiles, which is what we're testing
+        // We can't actually call it since Infallible can't be constructed
+    }
+}

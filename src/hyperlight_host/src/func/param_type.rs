@@ -144,3 +144,121 @@ macro_rules! impl_param_tuple {
 }
 
 for_each_tuple!(impl_param_tuple);
+
+#[cfg(test)]
+mod tests {
+    use hyperlight_common::flatbuffer_wrappers::function_types::{ParameterType, ParameterValue};
+
+    use super::*;
+
+    #[test]
+    fn test_string_supported_parameter_type() {
+        let test_string = "test".to_string();
+        assert_eq!(
+            <String as SupportedParameterType>::TYPE,
+            ParameterType::String
+        );
+
+        let value = <String as SupportedParameterType>::into_value(test_string.clone());
+        match value {
+            ParameterValue::String(s) => assert_eq!(s, test_string),
+            _ => panic!("Expected String parameter value"),
+        }
+
+        let recovered = <String as SupportedParameterType>::from_value(ParameterValue::String(
+            test_string.clone(),
+        ))
+        .unwrap();
+        assert_eq!(recovered, test_string);
+    }
+
+    #[test]
+    fn test_i32_supported_parameter_type() {
+        let test_val = 42i32;
+        assert_eq!(<i32 as SupportedParameterType>::TYPE, ParameterType::Int);
+
+        let value = <i32 as SupportedParameterType>::into_value(test_val);
+        match value {
+            ParameterValue::Int(i) => assert_eq!(i, test_val),
+            _ => panic!("Expected Int parameter value"),
+        }
+
+        let recovered =
+            <i32 as SupportedParameterType>::from_value(ParameterValue::Int(test_val)).unwrap();
+        assert_eq!(recovered, test_val);
+    }
+
+    #[test]
+    fn test_parameter_type_conversion_error() {
+        // Try to convert wrong type
+        let result =
+            <i32 as SupportedParameterType>::from_value(ParameterValue::String("test".to_string()));
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            crate::HyperlightError::ParameterValueConversionFailure(_, _) => {
+                // Expected error
+            }
+            other => panic!("Unexpected error type: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_single_parameter_tuple() {
+        let test_val = 42i32;
+        assert_eq!(<i32 as ParameterTuple>::SIZE, 1);
+        assert_eq!(<i32 as ParameterTuple>::TYPE, &[ParameterType::Int]);
+
+        let values = <i32 as ParameterTuple>::into_value(test_val);
+        assert_eq!(values.len(), 1);
+
+        let recovered = <i32 as ParameterTuple>::from_value(values).unwrap();
+        assert_eq!(recovered, test_val);
+    }
+
+    #[test]
+    fn test_two_parameter_tuple() {
+        let test_tuple = (42i32, "test".to_string());
+        assert_eq!(<(i32, String) as ParameterTuple>::SIZE, 2);
+        assert_eq!(
+            <(i32, String) as ParameterTuple>::TYPE,
+            &[ParameterType::Int, ParameterType::String]
+        );
+
+        let values = <(i32, String) as ParameterTuple>::into_value(test_tuple.clone());
+        assert_eq!(values.len(), 2);
+
+        let recovered = <(i32, String) as ParameterTuple>::from_value(values).unwrap();
+        assert_eq!(recovered.0, test_tuple.0);
+        assert_eq!(recovered.1, test_tuple.1);
+    }
+
+    #[test]
+    fn test_parameter_tuple_wrong_argument_count() {
+        // Try to create a two-parameter tuple from one parameter
+        let result = <(i32, String) as ParameterTuple>::from_value(vec![ParameterValue::Int(42)]);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            crate::HyperlightError::UnexpectedNoOfArguments(got, expected) => {
+                assert_eq!(got, 1);
+                assert_eq!(expected, 2);
+            }
+            other => panic!("Unexpected error type: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_empty_tuple() {
+        // Test the unit type as a parameter tuple
+        let unit = ();
+        assert_eq!(<() as ParameterTuple>::SIZE, 0);
+        assert_eq!(<() as ParameterTuple>::TYPE, &[]);
+
+        let values = <() as ParameterTuple>::into_value(unit);
+        assert_eq!(values.len(), 0);
+
+        let recovered = <() as ParameterTuple>::from_value(values).unwrap();
+        assert_eq!(recovered, ());
+    }
+}
