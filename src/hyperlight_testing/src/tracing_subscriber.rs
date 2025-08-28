@@ -217,3 +217,192 @@ impl Subscriber for TracingSubscriber {
 
     fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
 }
+
+#[cfg(test)]
+mod tests {
+    use std::thread;
+
+    use serde_json::Value;
+    use tracing::Level;
+
+    use super::*;
+
+    #[test]
+    fn test_tracing_subscriber_new() {
+        let subscriber = TracingSubscriber::new(Level::INFO);
+
+        // Verify the subscriber is created successfully
+        assert!(format!("{:?}", subscriber).contains("TracingSubscriber"));
+
+        // Clean up
+        subscriber.clear();
+    }
+
+    #[test]
+    fn test_get_events_empty() {
+        let subscriber = TracingSubscriber::new(Level::DEBUG);
+
+        // Initially, events should be empty
+        let events = subscriber.get_events();
+        assert!(events.is_empty());
+
+        subscriber.clear();
+    }
+
+    #[test]
+    fn test_clear_functionality() {
+        let subscriber = TracingSubscriber::new(Level::DEBUG);
+
+        // Clear should not panic even when nothing exists
+        subscriber.clear();
+
+        // Events should be empty after clear
+        let events_after_clear = subscriber.get_events();
+        assert!(events_after_clear.is_empty());
+    }
+
+    #[test]
+    fn test_get_span_panic_conditions() {
+        let subscriber = TracingSubscriber::new(Level::INFO);
+
+        // Test that getting non-existent span panics
+        let result = std::panic::catch_unwind(|| {
+            subscriber.get_span(999);
+        });
+        assert!(result.is_err());
+
+        subscriber.clear();
+    }
+
+    #[test]
+    fn test_get_span_metadata_panic_conditions() {
+        let subscriber = TracingSubscriber::new(Level::INFO);
+
+        // Test that getting non-existent span metadata panics
+        let result = std::panic::catch_unwind(|| {
+            subscriber.get_span_metadata(999);
+        });
+        assert!(result.is_err());
+
+        subscriber.clear();
+    }
+
+    #[test]
+    fn test_test_trace_records_empty() {
+        let subscriber = TracingSubscriber::new(Level::INFO);
+
+        // Use test_trace_records to inspect empty data
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let spans_received = Rc::new(RefCell::new(None::<std::collections::HashMap<u64, Value>>));
+        let events_received = Rc::new(RefCell::new(None::<Vec<Value>>));
+
+        let spans_clone = spans_received.clone();
+        let events_clone = events_received.clone();
+
+        subscriber.test_trace_records(move |spans, events| {
+            *spans_clone.borrow_mut() = Some(spans.clone());
+            *events_clone.borrow_mut() = Some(events.clone());
+        });
+
+        // Verify we received the data
+        let spans = spans_received.borrow().as_ref().unwrap().clone();
+        let events = events_received.borrow().as_ref().unwrap().clone();
+
+        // Should have no spans initially
+        assert!(spans.is_empty());
+
+        // Events should be empty
+        assert!(events.is_empty());
+
+        subscriber.clear();
+    }
+
+    #[test]
+    fn test_thread_local_isolation_basic() {
+        let subscriber = TracingSubscriber::new(Level::INFO);
+
+        // Get initial events in main thread
+        let main_events = subscriber.get_events();
+        assert!(main_events.is_empty());
+
+        // Spawn a thread and test isolation
+        let handle = thread::spawn(move || {
+            let thread_subscriber = TracingSubscriber::new(Level::INFO);
+            let thread_events = thread_subscriber.get_events();
+            assert!(thread_events.is_empty());
+            thread_subscriber.clear();
+        });
+
+        handle.join().unwrap();
+
+        // Main thread should still have empty events
+        let main_events_after = subscriber.get_events();
+        assert!(main_events_after.is_empty());
+
+        subscriber.clear();
+    }
+
+    #[test]
+    fn test_multiple_level_configurations() {
+        // Test different level configurations
+        let trace_subscriber = TracingSubscriber::new(Level::TRACE);
+        let debug_subscriber = TracingSubscriber::new(Level::DEBUG);
+        let info_subscriber = TracingSubscriber::new(Level::INFO);
+        let warn_subscriber = TracingSubscriber::new(Level::WARN);
+        let error_subscriber = TracingSubscriber::new(Level::ERROR);
+
+        // All should be created successfully
+        assert!(format!("{:?}", trace_subscriber).contains("TracingSubscriber"));
+        assert!(format!("{:?}", debug_subscriber).contains("TracingSubscriber"));
+        assert!(format!("{:?}", info_subscriber).contains("TracingSubscriber"));
+        assert!(format!("{:?}", warn_subscriber).contains("TracingSubscriber"));
+        assert!(format!("{:?}", error_subscriber).contains("TracingSubscriber"));
+
+        // Clean up all subscribers
+        trace_subscriber.clear();
+        debug_subscriber.clear();
+        info_subscriber.clear();
+        warn_subscriber.clear();
+        error_subscriber.clear();
+    }
+
+    #[test]
+    fn test_consecutive_clears() {
+        let subscriber = TracingSubscriber::new(Level::INFO);
+
+        // Multiple consecutive clears should not panic
+        subscriber.clear();
+        subscriber.clear();
+        subscriber.clear();
+
+        // Events should still be empty
+        let events = subscriber.get_events();
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn test_new_with_all_log_levels() {
+        // Test creating subscriber with each log level
+        let levels = [
+            Level::ERROR,
+            Level::WARN,
+            Level::INFO,
+            Level::DEBUG,
+            Level::TRACE,
+        ];
+
+        for level in levels {
+            let subscriber = TracingSubscriber::new(level);
+
+            // Should create successfully
+            assert!(format!("{:?}", subscriber).contains("TracingSubscriber"));
+
+            // Should have empty events initially
+            assert!(subscriber.get_events().is_empty());
+
+            subscriber.clear();
+        }
+    }
+}
