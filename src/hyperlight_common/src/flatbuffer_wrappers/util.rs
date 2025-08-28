@@ -221,6 +221,311 @@ mod tests {
     use crate::flatbuffer_wrappers::function_call::{FunctionCall, FunctionCallType};
     use crate::flatbuffer_wrappers::function_types::{ParameterValue, ReturnType};
 
+    // Tests for get_flatbuffer_result function and FlatbufferSerializable trait implementations
+
+    #[test]
+    fn test_get_flatbuffer_result_void() {
+        let result = get_flatbuffer_result(());
+
+        // Should produce valid flatbuffer data
+        assert!(!result.is_empty());
+        assert!(result.len() > 4); // Size prefix + flatbuffer content
+
+        // Verify the flatbuffer format - first 4 bytes are size prefix
+        let size = u32::from_le_bytes([result[0], result[1], result[2], result[3]]) as usize;
+        assert_eq!(size, result.len() - 4);
+    }
+
+    #[test]
+    fn test_get_flatbuffer_result_string() {
+        let test_string = "Hello, World!";
+        let result = get_flatbuffer_result(test_string);
+
+        // Should produce valid flatbuffer data
+        assert!(!result.is_empty());
+        assert!(result.len() > test_string.len()); // Should be larger due to flatbuffer overhead
+
+        // Verify size prefix
+        let size = u32::from_le_bytes([result[0], result[1], result[2], result[3]]) as usize;
+        assert_eq!(size, result.len() - 4);
+    }
+
+    #[test]
+    fn test_get_flatbuffer_result_byte_slice() {
+        let test_bytes: &[u8] = &[0x01, 0x02, 0x03, 0x04, 0x05];
+        let result = get_flatbuffer_result(test_bytes);
+
+        // Should produce valid flatbuffer data
+        assert!(!result.is_empty());
+        assert!(result.len() > test_bytes.len());
+
+        // Verify size prefix
+        let size = u32::from_le_bytes([result[0], result[1], result[2], result[3]]) as usize;
+        assert_eq!(size, result.len() - 4);
+    }
+
+    #[test]
+    fn test_get_flatbuffer_result_numeric_types() {
+        // Test all numeric types
+        let f32_result = get_flatbuffer_result(42.5f32);
+        let f64_result = get_flatbuffer_result(123.456789f64);
+        let i32_result = get_flatbuffer_result(-12345i32);
+        let i64_result = get_flatbuffer_result(-987654321i64);
+        let u32_result = get_flatbuffer_result(4294967295u32);
+        let u64_result = get_flatbuffer_result(18446744073709551615u64);
+        let bool_result = get_flatbuffer_result(true);
+
+        // All should produce valid data
+        for result in [
+            &f32_result,
+            &f64_result,
+            &i32_result,
+            &i64_result,
+            &u32_result,
+            &u64_result,
+            &bool_result,
+        ] {
+            assert!(!result.is_empty());
+            let size = u32::from_le_bytes([result[0], result[1], result[2], result[3]]) as usize;
+            assert_eq!(size, result.len() - 4);
+        }
+    }
+
+    #[test]
+    fn test_flatbuffer_serializable_void() {
+        let mut builder = FlatBufferBuilder::new();
+        let args = ().serialize(&mut builder);
+
+        assert_eq!(args.return_value_type, FbReturnValue::hlvoid);
+        assert!(args.return_value.is_some());
+    }
+
+    #[test]
+    fn test_flatbuffer_serializable_string() {
+        let test_str = "Test string for serialization";
+        let mut builder = FlatBufferBuilder::new();
+        let args = test_str.serialize(&mut builder);
+
+        assert_eq!(args.return_value_type, FbReturnValue::hlstring);
+        assert!(args.return_value.is_some());
+    }
+
+    #[test]
+    fn test_flatbuffer_serializable_byte_slice() {
+        let test_bytes: &[u8] = &[0x10, 0x20, 0x30, 0x40, 0x50];
+        let mut builder = FlatBufferBuilder::new();
+        let args = test_bytes.serialize(&mut builder);
+
+        assert_eq!(args.return_value_type, FbReturnValue::hlsizeprefixedbuffer);
+        assert!(args.return_value.is_some());
+    }
+
+    #[test]
+    fn test_flatbuffer_serializable_f32() {
+        let test_val = 3.14159f32;
+        let mut builder = FlatBufferBuilder::new();
+        let args = test_val.serialize(&mut builder);
+
+        assert_eq!(args.return_value_type, FbReturnValue::hlfloat);
+        assert!(args.return_value.is_some());
+    }
+
+    #[test]
+    fn test_flatbuffer_serializable_f64() {
+        let test_val = 2.718281828459045f64;
+        let mut builder = FlatBufferBuilder::new();
+        let args = test_val.serialize(&mut builder);
+
+        assert_eq!(args.return_value_type, FbReturnValue::hldouble);
+        assert!(args.return_value.is_some());
+    }
+
+    #[test]
+    fn test_flatbuffer_serializable_i32() {
+        let test_val = -2147483648i32;
+        let mut builder = FlatBufferBuilder::new();
+        let args = test_val.serialize(&mut builder);
+
+        assert_eq!(args.return_value_type, FbReturnValue::hlint);
+        assert!(args.return_value.is_some());
+    }
+
+    #[test]
+    fn test_flatbuffer_serializable_i64() {
+        let test_val = -9223372036854775808i64;
+        let mut builder = FlatBufferBuilder::new();
+        let args = test_val.serialize(&mut builder);
+
+        assert_eq!(args.return_value_type, FbReturnValue::hllong);
+        assert!(args.return_value.is_some());
+    }
+
+    #[test]
+    fn test_flatbuffer_serializable_u32() {
+        let test_val = 4294967295u32;
+        let mut builder = FlatBufferBuilder::new();
+        let args = test_val.serialize(&mut builder);
+
+        assert_eq!(args.return_value_type, FbReturnValue::hluint);
+        assert!(args.return_value.is_some());
+    }
+
+    #[test]
+    fn test_flatbuffer_serializable_u64() {
+        let test_val = 18446744073709551615u64;
+        let mut builder = FlatBufferBuilder::new();
+        let args = test_val.serialize(&mut builder);
+
+        assert_eq!(args.return_value_type, FbReturnValue::hlulong);
+        assert!(args.return_value.is_some());
+    }
+
+    #[test]
+    fn test_flatbuffer_serializable_bool() {
+        for test_val in [true, false] {
+            let mut builder = FlatBufferBuilder::new();
+            let args = test_val.serialize(&mut builder);
+
+            assert_eq!(args.return_value_type, FbReturnValue::hlbool);
+            assert!(args.return_value.is_some());
+        }
+    }
+
+    #[test]
+    fn test_get_flatbuffer_result_empty_string() {
+        let empty_str = "";
+        let result = get_flatbuffer_result(empty_str);
+
+        assert!(!result.is_empty());
+        let size = u32::from_le_bytes([result[0], result[1], result[2], result[3]]) as usize;
+        assert_eq!(size, result.len() - 4);
+    }
+
+    #[test]
+    fn test_get_flatbuffer_result_empty_byte_slice() {
+        let empty_bytes: &[u8] = &[];
+        let result = get_flatbuffer_result(empty_bytes);
+
+        assert!(!result.is_empty());
+        let size = u32::from_le_bytes([result[0], result[1], result[2], result[3]]) as usize;
+        assert_eq!(size, result.len() - 4);
+    }
+
+    #[test]
+    fn test_get_flatbuffer_result_extreme_values() {
+        // Test extreme values for each type
+        let results = vec![
+            get_flatbuffer_result(f32::MIN),
+            get_flatbuffer_result(f32::MAX),
+            get_flatbuffer_result(f32::INFINITY),
+            get_flatbuffer_result(f32::NEG_INFINITY),
+            get_flatbuffer_result(f64::MIN),
+            get_flatbuffer_result(f64::MAX),
+            get_flatbuffer_result(i32::MIN),
+            get_flatbuffer_result(i32::MAX),
+            get_flatbuffer_result(i64::MIN),
+            get_flatbuffer_result(i64::MAX),
+            get_flatbuffer_result(u32::MIN),
+            get_flatbuffer_result(u32::MAX),
+            get_flatbuffer_result(u64::MIN),
+            get_flatbuffer_result(u64::MAX),
+        ];
+
+        // All should produce valid flatbuffer data
+        for result in &results {
+            assert!(!result.is_empty());
+            let size = u32::from_le_bytes([result[0], result[1], result[2], result[3]]) as usize;
+            assert_eq!(size, result.len() - 4);
+        }
+    }
+
+    #[test]
+    fn test_get_flatbuffer_result_large_string() {
+        let large_string = "x".repeat(10000);
+        let result = get_flatbuffer_result(large_string.as_str());
+
+        assert!(!result.is_empty());
+        assert!(result.len() > 10000); // Should include string data plus overhead
+
+        let size = u32::from_le_bytes([result[0], result[1], result[2], result[3]]) as usize;
+        assert_eq!(size, result.len() - 4);
+    }
+
+    #[test]
+    fn test_get_flatbuffer_result_large_byte_array() {
+        let large_array = vec![0x42u8; 50000];
+        let result = get_flatbuffer_result(large_array.as_slice());
+
+        assert!(!result.is_empty());
+        assert!(result.len() > 50000); // Should include data plus overhead
+
+        let size = u32::from_le_bytes([result[0], result[1], result[2], result[3]]) as usize;
+        assert_eq!(size, result.len() - 4);
+    }
+
+    #[test]
+    fn test_get_flatbuffer_result_unicode_string() {
+        let unicode_str = "Hello 🦀 Rust! 你好世界 🚀";
+        let result = get_flatbuffer_result(unicode_str);
+
+        assert!(!result.is_empty());
+        // Unicode strings are larger in bytes than character count
+        assert!(result.len() > unicode_str.chars().count());
+
+        let size = u32::from_le_bytes([result[0], result[1], result[2], result[3]]) as usize;
+        assert_eq!(size, result.len() - 4);
+    }
+
+    #[test]
+    fn test_get_flatbuffer_result_consistency() {
+        // Multiple calls with same data should produce identical results
+        let test_data = "consistency test";
+        let result1 = get_flatbuffer_result(test_data);
+        let result2 = get_flatbuffer_result(test_data);
+
+        assert_eq!(result1, result2);
+    }
+
+    #[test]
+    fn test_flatbuffer_serializable_trait_coverage() {
+        // Ensure all implementations work correctly with their builders
+        let mut builder = FlatBufferBuilder::new();
+
+        // Test all trait implementations
+        let void_result = ().serialize(&mut builder);
+        let string_result = "test".serialize(&mut builder);
+        let bytes_result: &[u8] = &[1u8, 2, 3];
+        let bytes_result = bytes_result.serialize(&mut builder);
+        let f32_result = 1.23f32.serialize(&mut builder);
+        let f64_result = 4.56789f64.serialize(&mut builder);
+        let i32_result = (-42i32).serialize(&mut builder);
+        let i64_result = (-999i64).serialize(&mut builder);
+        let u32_result = 42u32.serialize(&mut builder);
+        let u64_result = 999u64.serialize(&mut builder);
+        let bool_result = true.serialize(&mut builder);
+
+        // All should have valid return value types and values
+        let results = [
+            (void_result, FbReturnValue::hlvoid),
+            (string_result, FbReturnValue::hlstring),
+            (bytes_result, FbReturnValue::hlsizeprefixedbuffer),
+            (f32_result, FbReturnValue::hlfloat),
+            (f64_result, FbReturnValue::hldouble),
+            (i32_result, FbReturnValue::hlint),
+            (i64_result, FbReturnValue::hllong),
+            (u32_result, FbReturnValue::hluint),
+            (u64_result, FbReturnValue::hlulong),
+            (bool_result, FbReturnValue::hlbool),
+        ];
+
+        for (args, expected_type) in results {
+            assert_eq!(args.return_value_type, expected_type);
+            assert!(args.return_value.is_some());
+        }
+    }
+
+    // Capacity estimation tests (existing tests)
+
     /// Helper function to check that estimation is within reasonable bounds (±25%)
     fn assert_estimation_accuracy(
         function_name: &str,
