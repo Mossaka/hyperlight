@@ -1,0 +1,65 @@
+name: 'Coverage Steps for Daily Test Improver'
+description: 'Build project, run tests, and generate coverage report for test improvement analysis'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: '1.86'
+        components: llvm-tools-preview
+    
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-llvm-cov
+
+    - name: Install Just
+      uses: extractions/setup-just@v2
+
+    - name: Set up nightly rust for formatting
+      uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: rustfmt
+
+    - name: Ensure up-to-date Cargo.lock
+      shell: bash
+      run: cargo fetch --locked
+
+    - name: Build test guest binaries
+      shell: bash
+      run: |
+        just build-rust-guests debug
+        just move-rust-guests debug
+        just build-c-guests debug  
+        just move-c-guests debug
+
+    - name: Build project
+      shell: bash
+      run: just build debug
+
+    - name: Run tests and generate coverage
+      shell: bash
+      run: |
+        # Run tests with coverage for the main hyperlight-host package
+        cargo llvm-cov --no-report --workspace --exclude hyperlight-guest-bin --exclude hyperlight-component-util --exclude hyperlight-component-macro --exclude trace_dump --lib
+        
+        # Also run integration tests with coverage
+        GUEST="rust" cargo llvm-cov --no-report --test integration_test
+        GUEST="c" cargo llvm-cov --no-report --test integration_test
+        
+        # Generate coverage reports
+        cargo llvm-cov report --lcov --output-path lcov.info
+        cargo llvm-cov report --html --output-dir coverage-report
+        cargo llvm-cov report --text > coverage-summary.txt
+
+    - name: Upload coverage report as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: |
+          coverage-report/
+          lcov.info
+          coverage-summary.txt
+        retention-days: 30
