@@ -18,6 +18,12 @@ runs:
     - name: Install Just
       uses: extractions/setup-just@v2
 
+    - name: Install LLVM and Clang
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y llvm clang lld
+
     - name: Set up nightly rust for formatting
       uses: dtolnay/rust-toolchain@nightly
       with:
