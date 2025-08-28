@@ -1,0 +1,61 @@
+name: 'Daily Test Coverage Improver - Coverage Steps'
+description: 'Builds the project, runs tests, and generates coverage reports'
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: '1.86'
+        
+    - name: Install just
+      uses: extractions/setup-just@v2
+      
+    - name: Install cargo-llvm-cov
+      shell: bash
+      run: cargo install cargo-llvm-cov --locked
+      
+    - name: Install build dependencies (Ubuntu)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential clang llvm-17-dev
+        
+    - name: Build and move Rust guests
+      shell: bash
+      run: |
+        just build-rust-guests debug
+        just move-rust-guests debug
+        
+    - name: Build C guests
+      shell: bash
+      run: |
+        just build-c-guests debug
+        just move-c-guests debug
+        
+    - name: Build the project
+      shell: bash
+      run: just build debug
+      
+    - name: Run tests with coverage
+      shell: bash
+      run: |
+        # Generate coverage report in lcov format
+        cargo llvm-cov --all-features --workspace --lcov --output-path coverage.lcov
+        
+        # Also generate HTML report for easier reading
+        cargo llvm-cov --all-features --workspace --html --output-dir coverage-html
+        
+        # Generate JSON report for programmatic analysis  
+        cargo llvm-cov --all-features --workspace --json --output-path coverage.json
+        
+    - name: Upload coverage reports as artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-reports
+        path: |
+          coverage.lcov
+          coverage.json
+          coverage-html/
+        retention-days: 30
