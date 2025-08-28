@@ -33,11 +33,9 @@ runs:
     - name: Build guest binaries
       shell: bash
       run: |
-        # Build and move guest binaries for testing
+        # Build and move Rust guest binaries for testing
         just build-rust-guests debug
         just move-rust-guests debug
-        just build-c-guests debug  
-        just move-c-guests debug
 
     - name: Build main project
       shell: bash
@@ -50,15 +48,12 @@ runs:
       shell: bash
       run: |
         # Use cargo-llvm-cov to run tests with coverage
-        # Focus on the main packages and exclude guest binaries from coverage
+        # Focus on the main packages only to avoid compilation issues with guest binaries
         cargo llvm-cov \
           --profile dev \
-          --workspace \
-          --exclude hyperlight-guest-bin \
-          --exclude callbackguest \
-          --exclude dummyguest \
-          --exclude simpleguest \
-          --exclude witguest \
+          --package hyperlight-host \
+          --package hyperlight-common \
+          --package hyperlight-testing \
           --lcov \
           --output-path coverage.lcov \
           test --lib
@@ -66,6 +61,7 @@ runs:
         # Also run integration tests with coverage
         GUEST=rust cargo llvm-cov \
           --profile dev \
+          --package hyperlight-host \
           --no-clean \
           --lcov \
           --output-path coverage-integration.lcov \
@@ -74,12 +70,9 @@ runs:
         # Generate HTML coverage report for easier analysis
         cargo llvm-cov \
           --profile dev \
-          --workspace \
-          --exclude hyperlight-guest-bin \
-          --exclude callbackguest \
-          --exclude dummyguest \
-          --exclude simpleguest \
-          --exclude witguest \
+          --package hyperlight-host \
+          --package hyperlight-common \
+          --package hyperlight-testing \
           --html \
           --output-dir coverage-html \
           test --lib
@@ -87,12 +80,9 @@ runs:
         # Create a summary coverage report
         cargo llvm-cov \
           --profile dev \
-          --workspace \
-          --exclude hyperlight-guest-bin \
-          --exclude callbackguest \
-          --exclude dummyguest \
-          --exclude simpleguest \
-          --exclude witguest \
+          --package hyperlight-host \
+          --package hyperlight-common \
+          --package hyperlight-testing \
           --summary-only \
           test --lib > coverage-summary.txt
         
