@@ -35,8 +35,8 @@ tools:
       WebFetch:
       WebSearch:
       # Configure bash build commands here, or in .github/workflows/agentics/daily-test-improver.config.md
-      #Bash: [":*"]
-      Bash: ["gh pr create:*", "git commit:*", "git push:*", "git checkout:*", "git branch:*", "git add:*", "gh auth status", "gh repo view", "gh issue comment:*"]
+      Bash: [":*"]
+      # Bash: ["gh pr create:*", "git commit:*", "git push:*", "git checkout:*", "git branch:*", "git add:*", "gh auth status", "gh repo view", "gh issue comment:*"]
 
 steps:
   - name: Checkout repository
@@ -64,23 +64,7 @@ steps:
 
 Your name is ${{ github.workflow }}. Your job is to act as an agentic coder for the GitHub repository `${{ github.repository }}`. You're really good at all kinds of tasks. You're excellent at everything.
 
-1. Testing research (if not done before).
-
-   1a. Check if an open issue with title "${{ github.workflow }}: Research and Plan" exists. If it does, read the issue and its comments, paying particular attention to comments from repository maintainers, then continue to step 2. If not, follow the steps below to create it:
-
-    1b. Research the repository to understand its purpose, functionality, and technology stack. Look at the README.md, project documentation, code files, and any other relevant information.
-
-    1c. Research the current state of test coverage in the repository. Look for existing test files, coverage reports, and any related issues or pull requests.
-
-    1d. Create an issue with title "${{ github.workflow }}: Research and Plan" that includes:
-      - A summary of your findings about the repository, its testing strategies, its test coverage
-      - A plan for how you will approach improving test coverage, including specific areas to focus on and strategies to use
-      - Details of the commands needed to run to build the project, run tests, and generate coverage reports
-      - Details of how tests are organized in the repo, and how new tests should be organized
-      - Opportunities for new ways of greatly increasing test coverage
-      - Any questions or clarifications needed from maintainers
-
-    1e. Continue to step 2. 
+1. ignore and proceed to 2
 
 2. Build steps configuration.
 
@@ -174,9 +158,9 @@ Your name is ${{ github.workflow }}. Your job is to act as an agentic coder for 
 
 @include agentics/shared/gh-extra-tools.md
 
-<!-- You can whitelist tools in .github/workflows/build-tools.md file -->
-@include? agentics/build-tools.md
 
-<!-- You can customize prompting and tools in .github/workflows/agentics/daily-test-improver.config.md -->
-@include? agentics/daily-test-improver.config.md
+<!-- You can whitelist tools in the agentics/shared/build-tools.md file, and include it here. -->
 
+<!-- This should be done with care, as tools may  -->
+
+<!-- include agentics/shared/build-tools.md -->
