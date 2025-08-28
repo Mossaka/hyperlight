@@ -1,0 +1,72 @@
+name: 'Coverage Steps for Daily Test Improver'
+description: 'Build project, run tests, and generate coverage report for test improvement analysis'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: '1.86'
+        components: llvm-tools-preview
+    
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-llvm-cov
+
+    - name: Install Just
+      uses: extractions/setup-just@v2
+
+    - name: Set up nightly rust for formatting
+      uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: rustfmt
+
+    - name: Ensure up-to-date Cargo.lock
+      shell: bash
+      run: cargo fetch --locked
+
+    - name: Build test guest binaries
+      shell: bash
+      run: |
+        just build-rust-guests debug
+        just move-rust-guests debug
+        just build-c-guests debug  
+        just move-c-guests debug
+
+    - name: Build project
+      shell: bash
+      run: just build debug
+
+    - name: Run tests and generate coverage
+      shell: bash
+      run: |
+        # Run unit tests with coverage for the main hyperlight-host package only
+        # Note: Some dependencies have instrumentation issues, so we focus on the main host package
+        cargo llvm-cov --no-report -p hyperlight-host --lib
+        
+        # Also run integration tests with coverage (rust guests only for now)
+        GUEST="rust" cargo llvm-cov --no-report -p hyperlight-host --test integration_test
+        
+        # Generate coverage reports (focusing on hyperlight-host)
+        cargo llvm-cov report --lcov --output-path lcov.info || echo "LCOV generation failed, continuing..."
+        cargo llvm-cov report --html --output-dir coverage-report || echo "HTML report generation failed, continuing..."
+        cargo llvm-cov report --text > coverage-summary.txt || echo "Text report generation failed, continuing..."
+        
+        # Create a basic summary if detailed reports failed
+        if [ ! -f coverage-summary.txt ] || [ ! -s coverage-summary.txt ]; then
+          echo "Coverage analysis completed but detailed reporting had issues." > coverage-summary.txt
+          echo "This suggests some code was instrumented but report generation encountered problems." >> coverage-summary.txt
+          echo "Manual analysis of instrumented code may be needed." >> coverage-summary.txt
+        fi
+
+    - name: Upload coverage report as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: |
+          coverage-report/
+          lcov.info
+          coverage-summary.txt
+        retention-days: 30
