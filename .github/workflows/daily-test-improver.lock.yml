@@ -15,7 +15,7 @@ run-name: "Daily Test Coverage Improver"
 
 jobs:
   daily-test-coverage-improver:
-    runs-on: ubuntu-latest
+    runs-on: ["self-hosted", "Linux", "X64", "1ES.Pool=hld-kvm-amd"]
     permissions:
       actions: read
       checks: read
