@@ -25,6 +25,9 @@ pub mod memory_region;
 /// Functionality that wraps a `SandboxMemoryLayout` and a
 /// `SandboxMemoryConfig` to mutate a sandbox's memory as necessary.
 pub mod mgr;
+/// Tests for the memory manager functionality
+#[cfg(test)]
+pub(crate) mod mgr_tests;
 /// Structures to represent pointers into guest and host memory
 pub mod ptr;
 /// Structures to represent memory address spaces into which pointers
