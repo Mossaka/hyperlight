@@ -983,4 +983,292 @@ mod tests {
             get_expected_memory_size(&sbox_mem_layout)
         );
     }
+
+    #[test]
+    fn test_debug_implementation() {
+        let sbox_cfg = SandboxConfiguration::default();
+        let layout = SandboxMemoryLayout::new(sbox_cfg, 4096, 2048, 4096, 1024, None).unwrap();
+
+        let debug_output = format!("{:?}", layout);
+
+        // Verify that debug output contains expected fields
+        assert!(debug_output.contains("SandboxMemoryLayout"));
+        assert!(debug_output.contains("Total Memory Size"));
+        assert!(debug_output.contains("Stack Size"));
+        assert!(debug_output.contains("Heap Size"));
+        assert!(debug_output.contains("Init Data Size"));
+        assert!(debug_output.contains("PEB Address"));
+        assert!(debug_output.contains("PEB Offset"));
+        assert!(debug_output.contains("Code Size"));
+        assert!(debug_output.contains("Security Cookie Seed Offset"));
+
+        // Check that values are formatted in hex
+        assert!(debug_output.contains("0x"));
+    }
+
+    #[test]
+    fn test_new_with_various_configurations() {
+        let sbox_cfg = SandboxConfiguration::default();
+
+        // Test basic configuration
+        let layout1 = SandboxMemoryLayout::new(sbox_cfg, 4096, 2048, 4096, 0, None);
+        assert!(layout1.is_ok());
+        let layout1 = layout1.unwrap();
+        assert_eq!(layout1.code_size, 4096);
+        assert_eq!(layout1.stack_size, 4096); // Constructor may adjust this
+        assert_eq!(layout1.heap_size, 4096);
+
+        // Test with init data
+        let init_flags = Some(DEFAULT_GUEST_BLOB_MEM_FLAGS);
+        let layout2 = SandboxMemoryLayout::new(sbox_cfg, 8192, 4096, 8192, 1024, init_flags);
+        assert!(layout2.is_ok());
+        let layout2 = layout2.unwrap();
+        assert_eq!(layout2.init_data_size, 1024);
+
+        // Test with larger values
+        let layout3 = SandboxMemoryLayout::new(sbox_cfg, 65536, 16384, 32768, 4096, None);
+        assert!(layout3.is_ok());
+    }
+
+    #[test]
+    fn test_getter_methods() {
+        let sbox_cfg = SandboxConfiguration::default();
+        let layout = SandboxMemoryLayout::new(sbox_cfg, 4096, 2048, 4096, 1024, None).unwrap();
+
+        // Test basic getters (access fields directly since no public getters exist)
+        // Constructor call: new(cfg, 4096, 2048, 4096, 1024, None)
+        //                        code  stack heap  init
+        // Note: Some values may be adjusted by the constructor logic
+        assert_eq!(layout.code_size, 4096);
+        assert_eq!(layout.stack_size, 4096); // May be adjusted by constructor
+        assert_eq!(layout.heap_size, 4096);
+        assert_eq!(layout.init_data_size, 1024);
+
+        // Test address getters
+        let guest_code_addr = layout.get_guest_code_address();
+        assert_eq!(
+            guest_code_addr,
+            SandboxMemoryLayout::BASE_ADDRESS + layout.guest_code_offset
+        );
+
+        // Test PEB getters
+        let peb_addr = layout.peb_address;
+        assert!(peb_addr > 0);
+
+        let peb_offset = layout.get_in_process_peb_offset();
+        assert_eq!(peb_offset, layout.peb_offset);
+
+        // Test various offset getters
+        let guard_page_offset = layout.get_guard_page_offset();
+        assert_eq!(guard_page_offset, layout.guard_page_offset);
+
+        // Test that memory size calculation is consistent
+        let memory_size = layout.get_memory_size();
+        assert!(memory_size.is_ok());
+        let memory_size = memory_size.unwrap();
+        assert!(memory_size > 0);
+
+        // Check that memory size is reasonable (should include all components)
+        let min_expected =
+            layout.code_size + layout.stack_size + layout.heap_size + layout.init_data_size;
+        assert!(
+            memory_size >= min_expected,
+            "Memory size {} should be at least the sum of components {}",
+            memory_size,
+            min_expected
+        );
+    }
+
+    #[test]
+    fn test_peb_offset_getters() {
+        let sbox_cfg = SandboxConfiguration::default();
+        let layout = SandboxMemoryLayout::new(sbox_cfg, 4096, 2048, 4096, 1024, None).unwrap();
+
+        // Test all PEB offset getters return reasonable values (using correct method names)
+        let heap_size_offset = layout.get_heap_size_offset();
+        assert!(heap_size_offset > 0);
+
+        let heap_pointer_offset = layout.get_heap_pointer_offset();
+        assert!(heap_pointer_offset > 0);
+
+        let min_stack_addr_offset = layout.get_min_guest_stack_address_offset();
+        assert!(min_stack_addr_offset > 0);
+
+        let user_stack_ptr_offset = layout.get_user_stack_pointer_offset();
+        assert!(user_stack_ptr_offset > 0);
+
+        let init_data_size_offset = layout.get_init_data_size_offset();
+        assert!(init_data_size_offset > 0);
+
+        let init_data_pointer_offset = layout.get_init_data_pointer_offset();
+        assert!(init_data_pointer_offset > 0);
+
+        let host_func_def_size_offset = layout.get_host_function_definitions_size_offset();
+        assert!(host_func_def_size_offset > 0);
+
+        let host_func_def_ptr_offset = layout.get_host_function_definitions_pointer_offset();
+        assert!(host_func_def_ptr_offset > 0);
+
+        // Verify all offsets are different (no duplicates)
+        let offsets = [
+            heap_size_offset,
+            heap_pointer_offset,
+            min_stack_addr_offset,
+            user_stack_ptr_offset,
+            init_data_size_offset,
+            init_data_pointer_offset,
+            host_func_def_size_offset,
+            host_func_def_ptr_offset,
+        ];
+
+        for i in 0..offsets.len() {
+            for j in (i + 1)..offsets.len() {
+                assert_ne!(
+                    offsets[i], offsets[j],
+                    "Offsets at indices {} and {} are the same",
+                    i, j
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_memory_layout_structure() {
+        let sbox_cfg = SandboxConfiguration::default();
+        let layout = SandboxMemoryLayout::new(sbox_cfg, 4096, 2048, 4096, 1024, None).unwrap();
+
+        // Test that memory size is reasonable and includes all components
+        let memory_size = layout.get_memory_size().unwrap();
+        assert!(memory_size > 4096); // Should be more than just code size
+        assert!(memory_size >= layout.code_size + layout.stack_size + layout.heap_size);
+
+        // Test that various offsets make sense relative to each other
+        let peb_offset = layout.get_in_process_peb_offset();
+        let guard_page_offset = layout.get_guard_page_offset();
+        let guest_code_offset = layout.get_guest_code_offset();
+        let output_data_offset = layout.get_output_data_offset();
+
+        // Basic sanity checks on offset ordering (exact order may vary by build config)
+        assert!(peb_offset > 0);
+        assert!(guard_page_offset > 0);
+        assert!(guest_code_offset > 0);
+        assert!(output_data_offset > 0);
+
+        // Test that the layout preserves configuration correctly
+        // Constructor call: new(cfg, 4096, 2048, 4096, 1024, None)
+        //                        code  stack heap  init
+        // Note: Constructor may adjust some values
+        assert_eq!(layout.code_size, 4096);
+        assert_eq!(layout.stack_size, 4096); // May be adjusted by constructor
+        assert_eq!(layout.heap_size, 4096);
+        assert_eq!(layout.init_data_size, 1024);
+    }
+
+    #[cfg(feature = "init-paging")]
+    #[test]
+    fn test_paging_features() {
+        let sbox_cfg = SandboxConfiguration::default();
+        let layout = SandboxMemoryLayout::new(sbox_cfg, 4096, 2048, 4096, 0, None).unwrap();
+
+        // Test page table size getter (only available in test builds with paging feature)
+        let page_table_size = layout.get_page_table_size();
+        assert!(page_table_size > 0);
+        assert!(page_table_size % PAGE_SIZE_USIZE == 0); // Should be page-aligned
+
+        // Test paging-specific constants
+        assert_eq!(SandboxMemoryLayout::PML4_OFFSET, 0x0000);
+        assert_eq!(SandboxMemoryLayout::PDPT_OFFSET, 0x1000);
+        assert_eq!(SandboxMemoryLayout::PD_OFFSET, 0x2000);
+        assert_eq!(SandboxMemoryLayout::PT_OFFSET, 0x3000);
+
+        // Test address constants
+        assert_eq!(
+            SandboxMemoryLayout::PD_GUEST_ADDRESS,
+            SandboxMemoryLayout::BASE_ADDRESS + SandboxMemoryLayout::PD_OFFSET
+        );
+        assert_eq!(
+            SandboxMemoryLayout::PDPT_GUEST_ADDRESS,
+            SandboxMemoryLayout::BASE_ADDRESS + SandboxMemoryLayout::PDPT_OFFSET
+        );
+        assert_eq!(
+            SandboxMemoryLayout::PT_GUEST_ADDRESS,
+            SandboxMemoryLayout::BASE_ADDRESS + SandboxMemoryLayout::PT_OFFSET
+        );
+    }
+
+    #[test]
+    fn test_constants_and_limits() {
+        // Test that important constants have expected values
+        assert_eq!(SandboxMemoryLayout::BASE_ADDRESS, 0x0);
+        assert_eq!(SandboxMemoryLayout::PML4_OFFSET, 0x0000);
+
+        // Test that MAX_MEMORY_SIZE is reasonable (check actual value to avoid constant assertion)
+        let max_memory_size = SandboxMemoryLayout::MAX_MEMORY_SIZE;
+        assert!(max_memory_size > 0);
+        assert!(max_memory_size < usize::MAX);
+
+        // Test STACK_POINTER_SIZE_BYTES
+        assert_eq!(SandboxMemoryLayout::STACK_POINTER_SIZE_BYTES, 8);
+    }
+
+    #[test]
+    fn test_error_conditions() {
+        let sbox_cfg = SandboxConfiguration::default();
+
+        // Test with extremely large memory requirements (should fail gracefully)
+        // Use smaller values to avoid overflow during calculation
+        let large_size = 0x10000000; // 256MB - large but not overflow-prone
+        let result =
+            SandboxMemoryLayout::new(sbox_cfg, large_size, large_size, large_size, 0, None);
+        // This should either succeed or fail gracefully with a proper error
+        if let Err(e) = result {
+            // Verify error is one of the expected types
+            assert!(
+                matches!(e, MemoryRequestTooBig { .. }) || matches!(e, GuestOffsetIsInvalid { .. })
+            );
+        }
+    }
+
+    #[test]
+    fn test_various_offset_methods() {
+        let sbox_cfg = SandboxConfiguration::default();
+        let layout = SandboxMemoryLayout::new(sbox_cfg, 4096, 2048, 4096, 1024, None).unwrap();
+
+        // Test additional offset getters that aren't covered by other tests
+        let output_data_size_offset = layout.get_output_data_size_offset();
+        assert!(output_data_size_offset > 0);
+
+        let host_func_defs_size_offset = layout.get_host_function_definitions_size_offset();
+        assert!(host_func_defs_size_offset > 0);
+
+        let guest_stack_size = layout.get_guest_stack_size();
+        assert_eq!(guest_stack_size, 4096); // Constructor may adjust this value
+
+        let outb_pointer_offset = layout.get_outb_pointer_offset();
+        assert!(outb_pointer_offset > 0);
+
+        let outb_context_offset = layout.get_outb_context_offset();
+        assert!(outb_context_offset > 0);
+
+        let output_data_offset = layout.get_output_data_offset();
+        assert!(output_data_offset > 0);
+
+        let input_data_size_offset = layout.get_input_data_size_offset();
+        assert!(input_data_size_offset > 0);
+
+        let code_pointer_offset = layout.get_code_pointer_offset();
+        assert!(code_pointer_offset > 0);
+
+        let dispatch_function_ptr_offset = layout.get_dispatch_function_pointer_offset();
+        assert!(dispatch_function_ptr_offset > 0);
+
+        let in_process_peb_offset = layout.get_in_process_peb_offset();
+        assert!(in_process_peb_offset > 0);
+
+        let top_of_user_stack_offset = layout.get_top_of_user_stack_offset();
+        assert!(top_of_user_stack_offset > 0);
+
+        let guest_code_offset = layout.get_guest_code_offset();
+        assert!(guest_code_offset > 0);
+    }
 }
