@@ -274,10 +274,303 @@ impl TryFrom<&[u8]> for FunctionCall {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec;
+    use alloc::{format, vec};
 
     use super::*;
     use crate::flatbuffer_wrappers::function_types::ReturnType;
+
+    #[test]
+    fn test_function_call_new() {
+        let function_call = FunctionCall::new(
+            "test_function".to_string(),
+            Some(vec![ParameterValue::Int(42)]),
+            FunctionCallType::Guest,
+            ReturnType::Int,
+        );
+
+        assert_eq!(function_call.function_name, "test_function");
+        assert!(function_call.parameters.is_some());
+        assert_eq!(function_call.function_call_type(), FunctionCallType::Guest);
+        assert_eq!(function_call.expected_return_type, ReturnType::Int);
+    }
+
+    #[test]
+    fn test_function_call_new_with_none_parameters() {
+        let function_call = FunctionCall::new(
+            "no_params_function".to_string(),
+            None,
+            FunctionCallType::Host,
+            ReturnType::Void,
+        );
+
+        assert_eq!(function_call.function_name, "no_params_function");
+        assert!(function_call.parameters.is_none());
+        assert_eq!(function_call.function_call_type(), FunctionCallType::Host);
+        assert_eq!(function_call.expected_return_type, ReturnType::Void);
+    }
+
+    #[test]
+    fn test_function_call_type_getter() {
+        let guest_call = FunctionCall::new(
+            "guest_func".to_string(),
+            None,
+            FunctionCallType::Guest,
+            ReturnType::Int,
+        );
+        assert_eq!(guest_call.function_call_type(), FunctionCallType::Guest);
+
+        let host_call = FunctionCall::new(
+            "host_func".to_string(),
+            None,
+            FunctionCallType::Host,
+            ReturnType::String,
+        );
+        assert_eq!(host_call.function_call_type(), FunctionCallType::Host);
+    }
+
+    #[test]
+    fn test_encode_with_no_parameters() {
+        let function_call = FunctionCall::new(
+            "no_params".to_string(),
+            None,
+            FunctionCallType::Guest,
+            ReturnType::Void,
+        );
+
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = function_call.encode(&mut builder);
+
+        assert!(!encoded.is_empty());
+        // Verify we can decode it back
+        let decoded = FunctionCall::try_from(encoded).unwrap();
+        assert_eq!(decoded.function_name, "no_params");
+        assert!(decoded.parameters.is_none());
+        assert_eq!(decoded.function_call_type, FunctionCallType::Guest);
+    }
+
+    #[test]
+    fn test_encode_with_empty_parameters() {
+        let function_call = FunctionCall::new(
+            "empty_params".to_string(),
+            Some(vec![]),
+            FunctionCallType::Host,
+            ReturnType::Int,
+        );
+
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = function_call.encode(&mut builder);
+
+        assert!(!encoded.is_empty());
+        // Verify we can decode it back
+        let decoded = FunctionCall::try_from(encoded).unwrap();
+        assert_eq!(decoded.function_name, "empty_params");
+        // Empty parameter vec gets converted to None in the current implementation
+        // This is because FlatBuffers treats empty vectors as None
+        assert!(decoded.parameters.is_none());
+    }
+
+    #[test]
+    fn test_encode_individual_parameter_types() -> Result<()> {
+        // Test Int parameter
+        let int_call = FunctionCall::new(
+            "int_func".to_string(),
+            Some(vec![ParameterValue::Int(42)]),
+            FunctionCallType::Guest,
+            ReturnType::Int,
+        );
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = int_call.encode(&mut builder);
+        let decoded = FunctionCall::try_from(encoded)?;
+        assert_eq!(
+            decoded.parameters.as_ref().unwrap()[0],
+            ParameterValue::Int(42)
+        );
+
+        // Test UInt parameter
+        let uint_call = FunctionCall::new(
+            "uint_func".to_string(),
+            Some(vec![ParameterValue::UInt(123u32)]),
+            FunctionCallType::Host,
+            ReturnType::UInt,
+        );
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = uint_call.encode(&mut builder);
+        let decoded = FunctionCall::try_from(encoded)?;
+        assert_eq!(
+            decoded.parameters.as_ref().unwrap()[0],
+            ParameterValue::UInt(123)
+        );
+
+        // Test Long parameter
+        let long_call = FunctionCall::new(
+            "long_func".to_string(),
+            Some(vec![ParameterValue::Long(9876543210i64)]),
+            FunctionCallType::Guest,
+            ReturnType::Long,
+        );
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = long_call.encode(&mut builder);
+        let decoded = FunctionCall::try_from(encoded)?;
+        assert_eq!(
+            decoded.parameters.as_ref().unwrap()[0],
+            ParameterValue::Long(9876543210)
+        );
+
+        // Test ULong parameter
+        let ulong_call = FunctionCall::new(
+            "ulong_func".to_string(),
+            Some(vec![ParameterValue::ULong(18446744073709551615u64)]),
+            FunctionCallType::Host,
+            ReturnType::ULong,
+        );
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = ulong_call.encode(&mut builder);
+        let decoded = FunctionCall::try_from(encoded)?;
+        assert_eq!(
+            decoded.parameters.as_ref().unwrap()[0],
+            ParameterValue::ULong(18446744073709551615)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_encode_float_and_double_parameters() -> Result<()> {
+        // Test Float parameter
+        let float_call = FunctionCall::new(
+            "float_func".to_string(),
+            Some(vec![ParameterValue::Float(3.14159f32)]),
+            FunctionCallType::Guest,
+            ReturnType::Float,
+        );
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = float_call.encode(&mut builder);
+        let decoded = FunctionCall::try_from(encoded)?;
+        assert_eq!(
+            decoded.parameters.as_ref().unwrap()[0],
+            ParameterValue::Float(3.14159)
+        );
+
+        // Test Double parameter
+        let double_call = FunctionCall::new(
+            "double_func".to_string(),
+            Some(vec![ParameterValue::Double(2.718281828459045f64)]),
+            FunctionCallType::Host,
+            ReturnType::Double,
+        );
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = double_call.encode(&mut builder);
+        let decoded = FunctionCall::try_from(encoded)?;
+        assert_eq!(
+            decoded.parameters.as_ref().unwrap()[0],
+            ParameterValue::Double(2.718281828459045)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_encode_bool_and_string_parameters() -> Result<()> {
+        // Test Bool parameter (true)
+        let bool_true_call = FunctionCall::new(
+            "bool_func".to_string(),
+            Some(vec![ParameterValue::Bool(true)]),
+            FunctionCallType::Guest,
+            ReturnType::Bool,
+        );
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = bool_true_call.encode(&mut builder);
+        let decoded = FunctionCall::try_from(encoded)?;
+        assert_eq!(
+            decoded.parameters.as_ref().unwrap()[0],
+            ParameterValue::Bool(true)
+        );
+
+        // Test Bool parameter (false)
+        let bool_false_call = FunctionCall::new(
+            "bool_func2".to_string(),
+            Some(vec![ParameterValue::Bool(false)]),
+            FunctionCallType::Host,
+            ReturnType::Bool,
+        );
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = bool_false_call.encode(&mut builder);
+        let decoded = FunctionCall::try_from(encoded)?;
+        assert_eq!(
+            decoded.parameters.as_ref().unwrap()[0],
+            ParameterValue::Bool(false)
+        );
+
+        // Test String parameter
+        let string_call = FunctionCall::new(
+            "string_func".to_string(),
+            Some(vec![ParameterValue::String(
+                "Hello, Hyperlight!".to_string(),
+            )]),
+            FunctionCallType::Guest,
+            ReturnType::String,
+        );
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = string_call.encode(&mut builder);
+        let decoded = FunctionCall::try_from(encoded)?;
+        assert_eq!(
+            decoded.parameters.as_ref().unwrap()[0],
+            ParameterValue::String("Hello, Hyperlight!".to_string())
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_encode_vecbytes_parameter() -> Result<()> {
+        let vec_data = vec![0x01, 0x02, 0x03, 0xff, 0xaa, 0xbb, 0xcc];
+        let vecbytes_call = FunctionCall::new(
+            "vecbytes_func".to_string(),
+            Some(vec![ParameterValue::VecBytes(vec_data.clone())]),
+            FunctionCallType::Host,
+            ReturnType::VecBytes,
+        );
+
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = vecbytes_call.encode(&mut builder);
+        let decoded = FunctionCall::try_from(encoded)?;
+        assert_eq!(
+            decoded.parameters.as_ref().unwrap()[0],
+            ParameterValue::VecBytes(vec_data)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_encode_mixed_parameters() -> Result<()> {
+        let mixed_call = FunctionCall::new(
+            "mixed_func".to_string(),
+            Some(vec![
+                ParameterValue::Int(42),
+                ParameterValue::String("test".to_string()),
+                ParameterValue::Bool(true),
+                ParameterValue::Float(1.23f32),
+                ParameterValue::VecBytes(vec![1, 2, 3]),
+            ]),
+            FunctionCallType::Guest,
+            ReturnType::Int,
+        );
+
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = mixed_call.encode(&mut builder);
+        let decoded = FunctionCall::try_from(encoded)?;
+
+        let params = decoded.parameters.as_ref().unwrap();
+        assert_eq!(params.len(), 5);
+        assert_eq!(params[0], ParameterValue::Int(42));
+        assert_eq!(params[1], ParameterValue::String("test".to_string()));
+        assert_eq!(params[2], ParameterValue::Bool(true));
+        assert_eq!(params[3], ParameterValue::Float(1.23));
+        assert_eq!(params[4], ParameterValue::VecBytes(vec![1, 2, 3]));
+
+        Ok(())
+    }
 
     #[test]
     fn read_from_flatbuffer() -> Result<()> {
@@ -326,5 +619,118 @@ mod tests {
         assert_eq!(function_call.function_call_type, FunctionCallType::Guest);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_validate_guest_function_call_buffer() -> Result<()> {
+        // Test valid guest function call
+        let guest_call = FunctionCall::new(
+            "guest_func".to_string(),
+            None,
+            FunctionCallType::Guest,
+            ReturnType::Void,
+        );
+
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = guest_call.encode(&mut builder);
+
+        // Should validate successfully
+        assert!(validate_guest_function_call_buffer(encoded).is_ok());
+
+        // Test with host function call (should fail)
+        let host_call = FunctionCall::new(
+            "host_func".to_string(),
+            None,
+            FunctionCallType::Host,
+            ReturnType::Void,
+        );
+
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = host_call.encode(&mut builder);
+
+        // Should fail validation
+        assert!(validate_guest_function_call_buffer(encoded).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_host_function_call_buffer() -> Result<()> {
+        // Test valid host function call
+        let host_call = FunctionCall::new(
+            "host_func".to_string(),
+            None,
+            FunctionCallType::Host,
+            ReturnType::Void,
+        );
+
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = host_call.encode(&mut builder);
+
+        // Should validate successfully
+        assert!(validate_host_function_call_buffer(encoded).is_ok());
+
+        // Test with guest function call (should fail)
+        let guest_call = FunctionCall::new(
+            "guest_func".to_string(),
+            None,
+            FunctionCallType::Guest,
+            ReturnType::Void,
+        );
+
+        let mut builder = FlatBufferBuilder::new();
+        let encoded = guest_call.encode(&mut builder);
+
+        // Should fail validation
+        assert!(validate_host_function_call_buffer(encoded).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_functions_with_invalid_buffer() {
+        let invalid_buffer = b"invalid flatbuffer data";
+
+        // Both validation functions should handle invalid buffers gracefully
+        assert!(validate_guest_function_call_buffer(invalid_buffer).is_err());
+        assert!(validate_host_function_call_buffer(invalid_buffer).is_err());
+    }
+
+    #[test]
+    fn test_function_call_type_enum_debug_and_clone() {
+        let guest_type = FunctionCallType::Guest;
+        let host_type = FunctionCallType::Host;
+
+        // Test Debug trait
+        assert_eq!(format!("{:?}", guest_type), "Guest");
+        assert_eq!(format!("{:?}", host_type), "Host");
+
+        // Test Clone trait
+        let guest_clone = guest_type.clone();
+        let host_clone = host_type.clone();
+        assert_eq!(guest_type, guest_clone);
+        assert_eq!(host_type, host_clone);
+
+        // Test PartialEq and Eq
+        assert_eq!(guest_type, FunctionCallType::Guest);
+        assert_eq!(host_type, FunctionCallType::Host);
+        assert_ne!(guest_type, host_type);
+    }
+
+    #[test]
+    fn test_function_call_clone_trait() {
+        let original = FunctionCall::new(
+            "clone_test".to_string(),
+            Some(vec![ParameterValue::Int(99)]),
+            FunctionCallType::Guest,
+            ReturnType::Int,
+        );
+
+        let cloned = original.clone();
+
+        assert_eq!(original.function_name, cloned.function_name);
+        assert_eq!(original.parameters, cloned.parameters);
+        assert_eq!(original.function_call_type(), cloned.function_call_type());
+        assert_eq!(original.expected_return_type, cloned.expected_return_type);
     }
 }
