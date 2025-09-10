@@ -46,6 +46,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - run: |
+          echo $(whoami)
+          kvm-ok 
+
       - uses: hyperlight-dev/ci-setup-workflow@v1.6.0
         with:
           rust-toolchain: "1.86" 
